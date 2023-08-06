@@ -73,3 +73,9 @@ cd $CROSS_PATH/tests/TestingTriangle
 sed -i 's/safari/chrome/g' $CROSS_PATH/core/cmake/emscripten/run.browser.sh.in
 RUN_TEST -DPLATFORM=emscripten
 ```
+
+# Running
+
+```
+RUN_TEST -DPLATFORM=linux
+```
