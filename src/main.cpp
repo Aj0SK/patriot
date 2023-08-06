@@ -2,36 +2,47 @@
 
 #include <chrono>
 #include <glm/glm.hpp>
+#include <optional>
+#include <random>
 #include <vector>
 
-constexpr std::chrono::duration UPDATE_DURATION = std::chrono::milliseconds(10);
+constexpr float kMaxWorldSizeX = 100.0;
+constexpr float kMaxWorldSizeY = 100.0;
+
+static std::mt19937 rng{2104};
 
 struct Rocket {
   float x, y;
-  float speed;
-  glm::vec2 heading;
+  glm::vec2 speed;
+  glm::vec2 acc;
 };
 
-std::vector<SDL_Vertex> get_rocket_triangle(const Rocket& r) {
-  const SDL_Vertex a = {
-      SDL_FPoint{r.x, r.y},
-      SDL_Color{0, 255, 0, 255},
+std::vector<SDL_Vertex> get_rocket_triangle(const Rocket& r, float width,
+                                            float height) {
+  float x = r.x / kMaxWorldSizeX * width;
+  float y = r.y / kMaxWorldSizeY * height;
+
+  y = height - y;
+
+  const SDL_Vertex v1 = {
+      SDL_FPoint{x, y},
+      SDL_Color{255, 0, 0, 255},
       SDL_FPoint{0},
   };
 
-  const SDL_Vertex b = {
-      SDL_FPoint{r.x - 5, r.y - 5},
-      SDL_Color{0, 255, 0, 255},
+  const SDL_Vertex v2 = {
+      SDL_FPoint{x - 5, y - 5},
+      SDL_Color{255, 0, 0, 255},
       SDL_FPoint{0},
   };
 
-  const SDL_Vertex c = {
-      SDL_FPoint{r.x + 5, r.y - 5},
-      SDL_Color{0, 255, 0, 255},
+  const SDL_Vertex v3 = {
+      SDL_FPoint{x + 5, y - 5},
+      SDL_Color{255, 0, 0, 255},
       SDL_FPoint{0},
   };
 
-  return {a, b, c};
+  return {v1, v2, v3};
 }
 
 class RocketWorld {
@@ -39,10 +50,15 @@ class RocketWorld {
   RocketWorld(int rocket_count) {
     rockets_.reserve(rocket_count);
 
+    std::uniform_real_distribution<float> dis(0.0, 100.0);
+    std::uniform_real_distribution<float> dis2(0.0, 0.9);
+
     for (int i = 0; i < 100; ++i) {
-      const float x = static_cast<float>(rand() % 800);
-      const float y = static_cast<float>(rand() % 600);
-      rockets_.push_back(Rocket{x, y, 1});
+      const float x = static_cast<float>(0 /*dis(rng)*/);
+      const float y = static_cast<float>(dis(rng));
+      const glm::vec2 speed{30, 4};
+      const glm::vec2 acc{0, -9.8};
+      rockets_.push_back(Rocket{x, y, speed, acc});
     }
   }
 
@@ -55,21 +71,23 @@ class RocketWorld {
 
 class SDLWrapper {
  public:
-  static SDLWrapper Create() {
+  static SDLWrapper Create(int width, int height) {
     SDL_Init(SDL_INIT_EVERYTHING);
-    SDL_Window* window =
-        SDL_CreateWindow("SDL", SDL_WINDOWPOS_UNDEFINED,
-                         SDL_WINDOWPOS_UNDEFINED, 800, 600, SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("SDL", SDL_WINDOWPOS_UNDEFINED,
+                                          SDL_WINDOWPOS_UNDEFINED, width,
+                                          height, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(
         window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
-    return SDLWrapper(window, renderer);
+    return SDLWrapper(width, height, window, renderer);
   }
 
-  SDLWrapper(SDL_Window* window, SDL_Renderer* renderer)
-      : window_(window),
+  SDLWrapper(int width, int height, SDL_Window* window, SDL_Renderer* renderer)
+      : width_(width),
+        height_(height),
+        window_(window),
         renderer_(renderer),
-        last_update_(std::chrono::_V2::system_clock::duration::min()),
+        last_update_(std::nullopt),
         physics_world_(20) {}
 
   ~SDLWrapper() {
@@ -91,15 +109,29 @@ class SDLWrapper {
         }
       }
 
+      const auto now = std::chrono::system_clock::now();
+      if (!last_update_.has_value()) {
+        last_update_ = now;
+      }
+
+      float milli_diff = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             now - *last_update_)
+                             .count();
+      float dt = milli_diff / 1000.0;
       std::vector<SDL_Vertex> vertices;
       vertices.reserve(3 * physics_world_.get_rocket_count());
       for (Rocket& r : physics_world_.get_mutable_rockets()) {
-        r.y += r.speed;
-        for (SDL_Vertex v : get_rocket_triangle(r)) vertices.push_back(v);
+        r.x += r.speed.x * dt;
+        r.y += r.speed.y * dt;
+        r.speed.x += r.acc.x * dt;
+        r.speed.y += r.acc.y * dt;
+        for (SDL_Vertex v : get_rocket_triangle(r, width_, height_)) {
+          vertices.push_back(v);
+        }
       }
 
       last_update_ = std::chrono::system_clock::now();
-      SDL_SetRenderDrawColor(renderer_, 0, 0, 0, SDL_ALPHA_OPAQUE);
+      SDL_SetRenderDrawColor(renderer_, 255, 255, 255, SDL_ALPHA_OPAQUE);
       SDL_RenderClear(renderer_);
       SDL_RenderGeometry(renderer_, nullptr, vertices.data(), vertices.size(),
                          nullptr, 0);
@@ -108,9 +140,10 @@ class SDLWrapper {
   }
 
  private:
+  int width_, height_;
   SDL_Window* window_;
   SDL_Renderer* renderer_;
-  std::chrono::_V2::system_clock::time_point last_update_;
+  std::optional<std::chrono::_V2::system_clock::time_point> last_update_;
 
   // physic world part
   RocketWorld physics_world_;
@@ -118,7 +151,7 @@ class SDLWrapper {
 
 int main() {
   srand(2104);
-  SDLWrapper sdl_program = SDLWrapper::Create();
+  SDLWrapper sdl_program = SDLWrapper::Create(1920, 1080);
   sdl_program.render();
   return 0;
 }
