@@ -1,6 +1,6 @@
 # https://devhints.io/makefile
 CXX = g++
-CXXFLAGS = -Wall -Wextra -O2 -std=c++17
+CXXFLAGS = -Wall -Wextra -O3 -march=native -std=c++17
 SDLFLAGS = -lSDL2
 SRC = src
 BUILD = build

@@ -1,9 +1,12 @@
 #include <SDL2/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <execution>
 #include <glm/glm.hpp>
+#include <numeric>
 #include <optional>
 #include <random>
 #include <vector>
@@ -11,7 +14,7 @@
 constexpr float kMaxWorldSizeX = 100.0;
 constexpr float kMaxWorldSizeY = 100.0;
 
-constexpr int kRocketCount = 10;
+constexpr int kRocketCount = 100;
 
 constexpr int kWidth = 1920;
 constexpr int kHeight = 1080;
@@ -68,30 +71,16 @@ SDL_Triangle get_rocket_triangle(const Rocket& r, float width, float height) {
 
 class RocketWorld {
  public:
-  RocketWorld(int rocket_count) : rocket_count_(rocket_count) {
-    std::uniform_real_distribution<float> dis(0.0, 100.0);
-    std::uniform_int_distribution<uint8_t> dis_col(0, 255);
-    std::uniform_real_distribution<float> dis2(-15.0, 15.0);
+  RocketWorld() : rocket_count_(0) {}
 
-    rockets_.reserve(rocket_count);
-    triangles_.reserve(rocket_count);
-
-    for (int i = 0; i < rocket_count; ++i) {
-      const float x = static_cast<float>(dis(rng));
-      const float y = static_cast<float>(1 /*dis(rng)*/);
-      const glm::vec2 speed{dis2(rng), 30};
-      const glm::vec2 acc{0, -9.8};
-      const Color color{
-          .r = dis_col(rng), .g = dis_col(rng), .b = dis_col(rng)};
-      rockets_.push_back(Rocket{x, y, speed, acc, color});
-      triangles_.push_back(
-          get_rocket_triangle(rockets_.back(), kWidth, kHeight));
-    }
-  }
-
-  std::vector<Rocket>& get_mutable_rockets() { return rockets_; }
+  std::vector<Rocket>& GetMutableRockets() { return rockets_; }
   std::vector<SDL_Triangle>& get_triangles() { return triangles_; }
-  size_t get_rocket_count() const { return rockets_.size(); }
+  size_t get_rocket_count() const { return rocket_count_; }
+  void AddRocket(Rocket& r) {
+    ++rocket_count_;
+    rockets_.push_back(r);
+    triangles_.push_back(get_rocket_triangle(r, kWidth, kHeight));
+  }
 
  private:
   size_t rocket_count_;
@@ -119,8 +108,14 @@ class SDLWrapper {
     SDL_Quit();
   }
 
+  RocketWorld& GetMutablePhysics() { return physics_world_; }
+
   void render() {
+    // std::vector<int> idxs(physics_world_.get_rocket_count());
+    // std::iota(idxs.begin(), idxs.end(), 0);
+
     bool running = true;
+    last_update_ = std::chrono::system_clock::now();
     while (running) {
       SDL_Event ev;
       while (SDL_PollEvent(&ev)) {
@@ -133,16 +128,17 @@ class SDLWrapper {
       }
 
       const auto now = std::chrono::system_clock::now();
-      if (!last_update_.has_value()) {
-        last_update_ = now;
-      }
-
       float milli_diff = std::chrono::duration_cast<std::chrono::milliseconds>(
                              now - *last_update_)
                              .count();
       float dt = milli_diff / 1000.0;
+
+      /*std::for_each(std::execution::par_unseq, std::begin(idxs),
+         std::end(idxs),
+                    [&](int idx) {});*/
+
       for (size_t idx = 0; idx < physics_world_.get_rocket_count(); ++idx) {
-        Rocket& r = physics_world_.get_mutable_rockets()[idx];
+        Rocket& r = physics_world_.GetMutableRockets()[idx];
         r.x += r.speed.x * dt;
         r.y += r.speed.y * dt;
         r.speed.x += r.acc.x * dt;
@@ -169,7 +165,7 @@ class SDLWrapper {
         window_(window),
         renderer_(renderer),
         last_update_(std::nullopt),
-        physics_world_(kRocketCount) {}
+        physics_world_() {}
 
  private:
   int width_, height_;
@@ -183,6 +179,23 @@ class SDLWrapper {
 
 int main() {
   SDLWrapper sdl_program = SDLWrapper::Create(kWidth, kHeight);
+
+  RocketWorld& world = sdl_program.GetMutablePhysics();
+
+  std::uniform_real_distribution<float> dis(0.0, 100.0);
+  std::uniform_int_distribution<uint8_t> dis_col(0, 255);
+  std::uniform_real_distribution<float> dis2(-15.0, 15.0);
+
+  for (int i = 0; i < kRocketCount; ++i) {
+    const float x = static_cast<float>(dis(rng));
+    const float y = static_cast<float>(1 /*dis(rng)*/);
+    const glm::vec2 speed{dis2(rng), 30};
+    const glm::vec2 acc{0, -9.8};
+    const Color color{.r = dis_col(rng), .g = dis_col(rng), .b = dis_col(rng)};
+    Rocket r{x, y, speed, acc, color};
+    world.AddRocket(r);
+  }
+
   sdl_program.render();
   return 0;
 }
